@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+<title>จัดการสต็อกร้านชำ</title>
+<meta name="theme-color" content="#1F5C4E" />
+<link rel="manifest" href="manifest.json" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="สต็อกร้าน" />
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap');
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; background: #F7F3EA; font-family: 'Sarabun', sans-serif; }
+  #root { min-height: 100vh; }
+  input, select, button { font-family: inherit; }
+  button { cursor: pointer; }
+</style>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef } = React;
+
+// localStorage-backed storage, mirroring the async interface used by the app
+const storage = {
+  async get(key) {
+    try {
+      const v = window.localStorage.getItem(key);
+      if (v === null) return null;
+      return { key, value: v };
+    } catch (e) {
+      return null;
+    }
+  },
+  async set(key, value) {
+    try {
+      window.localStorage.setItem(key, value);
+      return { key, value };
+    } catch (e) {
+      return null;
+    }
+  },
+};
+
+const UNITS = ["ชิ้น", "ถุง", "ขวด", "กล่อง", "แพ็ค", "กระป๋อง", "ห่อ"];
+
+function uid() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+function formatMoney(n) {
+  return Number(n || 0).toLocaleString("th-TH", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
+function formatTime(ts) {
+  const d = new Date(ts);
+  return d.toLocaleString("th-TH", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+function StockApp() {
+  const [loaded, setLoaded] = useState(false);
+  const [shopName, setShopName] = useState("ร้านชำของฉัน");
+  const [products, setProducts] = useState([]);
+  const [history, setHistory] = useState([]);
+  const [tab, setTab] = useState("products");
+  const [search, setSearch] = useState("");
+  const [showAdd, setShowAdd] = useState(false);
+  const [addForm, setAddForm] = useState({ name: "", unit: "ชิ้น", qty: "", cost: "", price: "", low: "5", barcode: "" });
+  const [activeAdjust, setActiveAdjust] = useState(null);
+  const [adjustAmount, setAdjustAmount] = useState("");
+  const [adjustNote, setAdjustNote] = useState("");
+  const [saveError, setSaveError] = useState(false);
+
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const intervalRef = useRef(null);
+  const [scanStatus, setScanStatus] = useState("idle");
+  const [scanMatch, setScanMatch] = useState(null);
+  const [scanBarcode, setScanBarcode] = useState("");
+  const [manualCode, setManualCode] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await storage.get("pos-data");
+        if (res && res.value) {
+          const data = JSON.parse(res.value);
+          setShopName(data.shopName || "ร้านชำของฉัน");
+          setProducts(data.products || []);
+          setHistory(data.history || []);
+        }
+      } catch (e) {}
+      setLoaded(true);
+    })();
+  }, []);
+
+  async function persist(next) {
+    try {
+      const payload = {
+        shopName: next.shopName !== undefined ? next.shopName : shopName,
+        products: next.products !== undefined ? next.products : products,
+        history: next.history !== undefined ? next.history : history,
+      };
+      const result = await storage.set("pos-data", JSON.stringify(payload));
+      setSaveError(!result);
+    } catch (e) {
+      setSaveError(true);
+    }
+  }
+
+  function handleAddProduct() {
+    if (!addForm.name.trim()) return;
+    const newProduct = {
+      id: uid(),
+      name: addForm.name.trim(),
+      unit: addForm.unit,
+      qty: Number(addForm.qty) || 0,
+      cost: Number(addForm.cost) || 0,
+      price: Number(addForm.price) || 0,
+      low: Number(addForm.low) || 0,
+      barcode: addForm.barcode.trim(),
+    };
+    const nextProducts = [...products, newProduct];
+    setProducts(nextProducts);
+    let nextHistory = history;
+    if (newProduct.qty > 0) {
+      const entry = {
+        id: uid(), productId: newProduct.id, productName: newProduct.name,
+        type: "in", qty: newProduct.qty, note: "สต็อกเริ่มต้น", ts: Date.now(),
+      };
+      nextHistory = [entry, ...history];
+      setHistory(nextHistory);
+    }
+    persist({ products: nextProducts, history: nextHistory });
+    setAddForm({ name: "", unit: "ชิ้น", qty: "", cost: "", price: "", low: "5", barcode: "" });
+    setShowAdd(false);
+  }
+
+  function openAdjust(id, type) {
+    setActiveAdjust({ id, type });
+    setAdjustAmount("");
+    setAdjustNote("");
+  }
+
+  function submitAdjust() {
+    const amt = Number(adjustAmount);
+    if (!amt || amt <= 0 || !activeAdjust) return;
+    const product = products.find((p) => p.id === activeAdjust.id);
+    if (!product) return;
+    const delta = activeAdjust.type === "in" ? amt : -amt;
+    const newQty = Math.max(0, product.qty + delta);
+    const nextProducts = products.map((p) => (p.id === product.id ? { ...p, qty: newQty } : p));
+    const entry = {
+      id: uid(), productId: product.id, productName: product.name,
+      type: activeAdjust.type, qty: amt, note: adjustNote.trim(), ts: Date.now(),
+    };
+    const nextHistory = [entry, ...history];
+    setProducts(nextProducts);
+    setHistory(nextHistory);
+    persist({ products: nextProducts, history: nextHistory });
+    setActiveAdjust(null);
+    setAdjustAmount("");
+    setAdjustNote("");
+  }
+
+  function removeProduct(id) {
+    const nextProducts = products.filter((p) => p.id !== id);
+    setProducts(nextProducts);
+    persist({ products: nextProducts });
+  }
+
+  function handleShopNameChange(v) {
+    setShopName(v);
+    persist({ shopName: v });
+  }
+
+  function stopCamera() {
+    if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
+    if (streamRef.current) { streamRef.current.getTracks().forEach((t) => t.stop()); streamRef.current = null; }
+  }
+
+  function handleScanned(code) {
+    if (!code) return;
+    setScanBarcode(code);
+    setProducts((current) => {
+      const match = current.find((p) => p.barcode && p.barcode === code);
+      setScanMatch(match || "notfound");
+      return current;
+    });
+    stopCamera();
+    setScanStatus("found");
+  }
+
+  async function startCamera() {
+    setScanMatch(null);
+    setScanStatus("starting");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+      }
+      if (!("BarcodeDetector" in window)) { setScanStatus("unsupported"); return; }
+      setScanStatus("scanning");
+      const detector = new window.BarcodeDetector();
+      intervalRef.current = setInterval(async () => {
+        if (!videoRef.current) return;
+        try {
+          const codes = await detector.detect(videoRef.current);
+          if (codes && codes.length > 0) handleScanned(codes[0].rawValue);
+        } catch (e) {}
+      }, 400);
+    } catch (e) {
+      setScanStatus("denied");
+    }
+  }
+
+  useEffect(() => {
+    if (tab === "scan") startCamera(); else stopCamera();
+    return () => stopCamera();
+    // eslint-disable-next-line
+  }, [tab]);
+
+  const filtered = products.filter((p) => p.name.toLowerCase().includes(search.toLowerCase()));
+  const totalValue = products.reduce((sum, p) => sum + p.qty * p.cost, 0);
+  const lowStockCount = products.filter((p) => p.qty <= p.low).length;
+
+  if (!loaded) {
+    return <div className="min-h-[100vh] flex items-center justify-center text-[#8a8371]">กำลังโหลดข้อมูล...</div>;
+  }
+
+  return (
+    <div style={{ background: "#F7F3EA" }} className="min-h-[100vh] w-full text-[#2B2A25] pb-20">
+      <div style={{ background: "#1F5C4E" }} className="px-4 pt-6 pb-6 text-[#F7F3EA]">
+        <input
+          value={shopName}
+          onChange={(e) => handleShopNameChange(e.target.value)}
+          className="bg-transparent text-lg font-semibold outline-none w-full placeholder-[#B9D4CB]"
+          placeholder="ชื่อร้าน"
+        />
+        <div className="flex gap-4 mt-3 text-sm">
+          <div>
+            <div className="opacity-70 text-xs">มูลค่าสต็อก</div>
+            <div className="font-semibold text-base">฿{formatMoney(totalValue)}</div>
+          </div>
+          <div>
+            <div className="opacity-70 text-xs">รายการสินค้า</div>
+            <div className="font-semibold text-base">{products.length}</div>
+          </div>
+          <div>
+            <div className="opacity-70 text-xs">ใกล้หมด</div>
+            <div className="font-semibold text-base" style={{ color: lowStockCount > 0 ? "#F0C36D" : "#F7F3EA" }}>{lowStockCount}</div>
+          </div>
+        </div>
+        {saveError && <div className="mt-2 text-xs" style={{ color: "#F0C36D" }}>บันทึกข้อมูลไม่สำเร็จ ลองอีกครั้ง</div>}
+      </div>
+
+      {tab === "products" && (
+        <div className="px-4 -mt-3">
+          <div style={{ background: "#FFFFFF", border: "1px solid #E4DCC9" }} className="rounded-xl p-3 shadow-sm">
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหาสินค้า..." className="w-full text-sm outline-none px-2 py-1" />
+          </div>
+
+          <button onClick={() => setShowAdd((s) => !s)} style={{ background: "#1F5C4E", color: "#F7F3EA" }} className="w-full mt-3 rounded-xl py-2.5 text-sm font-medium">
+            {showAdd ? "ปิดฟอร์ม" : "+ เพิ่มสินค้าใหม่"}
+          </button>
+
+          {showAdd && (
+            <div style={{ background: "#FFFFFF", border: "1px solid #E4DCC9" }} className="rounded-xl p-3 mt-2 space-y-2">
+              <input value={addForm.name} onChange={(e) => setAddForm({ ...addForm, name: e.target.value })} placeholder="ชื่อสินค้า" className="w-full text-sm border rounded-lg px-2 py-1.5" style={{ borderColor: "#E4DCC9" }} />
+              <div className="flex gap-2">
+                <select value={addForm.unit} onChange={(e) => setAddForm({ ...addForm, unit: e.target.value })} className="flex-1 text-sm border rounded-lg px-2 py-1.5" style={{ borderColor: "#E4DCC9" }}>
+                  {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                </select>
+                <input value={addForm.qty} onChange={(e) => setAddForm({ ...addForm, qty: e.target.value })} placeholder="จำนวนเริ่มต้น" type="number" className="flex-1 text-sm border rounded-lg px-2 py-1.5" style={{ borderColor: "#E4DCC9" }} />
+              </div>
+              <div className="flex gap-2">
+                <input value={addForm.cost} onChange={(e) => setAddForm({ ...addForm, cost: e.target.value })} placeholder="ราคาทุน/หน่วย" type="number" className="flex-1 text-sm border rounded-lg px-2 py-1.5" style={{ borderColor: "#E4DCC9" }} />
+                <input value={addForm.price} onChange={(e) => setAddForm({ ...addForm, price: e.target.value })} placeholder="ราคาขาย/หน่วย" type="number" className="flex-1 text-sm border rounded-lg px-2 py-1.5" style={{ borderColor: "#E4DCC9" }} />
+              </div>
+              <input value={addForm.low} onChange={(e) => setAddForm({ ...addForm, low: e.target.value })} placeholder="แจ้งเตือนเมื่อเหลือ (ชิ้น)" type="number" className="w-full text-sm border rounded-lg px-2 py-1.5" style={{ borderColor: "#E4DCC9" }} />
+              <input value={addForm.barcode} onChange={(e) => setAddForm({ ...addForm, barcode: e.target.value })} placeholder="รหัสบาร์โค้ด (ไม่บังคับ)" className="w-full text-sm border rounded-lg px-2 py-1.5" style={{ borderColor: "#E4DCC9" }} />
+              <button onClick={handleAddProduct} style={{ background: "#1F5C4E", color: "#F7F3EA" }} className="w-full rounded-lg py-2 text-sm font-medium">บันทึกสินค้า</button>
+            </div>
+          )}
+
+          <div className="mt-3 space-y-2">
+            {filtered.length === 0 && (
+              <div className="text-center text-sm text-[#8a8371] py-10">
+                {products.length === 0 ? "ยังไม่มีสินค้า เริ่มเพิ่มรายการแรกได้เลย" : "ไม่พบสินค้าที่ค้นหา"}
+              </div>
+            )}
+            {filtered.map((p) => {
+              const isLow = p.qty <= p.low;
+              const isAdjusting = activeAdjust && activeAdjust.id === p.id;
+              return (
+                <div key={p.id} style={{ background: "#FFFFFF", border: "1px solid #E4DCC9" }} className="rounded-xl p-3">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <div className="font-medium text-sm">{p.name}</div>
+                      <div className="text-xs text-[#8a8371] mt-0.5">ทุน ฿{formatMoney(p.cost)} · ขาย ฿{formatMoney(p.price)} / {p.unit}</div>
+                      {p.barcode && <div className="text-xs text-[#8a8371]">รหัส {p.barcode}</div>}
+                    </div>
+                    <div className="text-right">
+                      <div className="font-semibold text-lg" style={{ color: isLow ? "#A34A34" : "#2B2A25" }}>{p.qty}</div>
+                      <div className="text-xs text-[#8a8371]">{p.unit}</div>
+                    </div>
+                  </div>
+                  {isLow && <div style={{ color: "#A34A34" }} className="text-xs mt-1">ใกล้หมด (เตือนที่ {p.low})</div>}
+
+                  {!isAdjusting ? (
+                    <div className="flex gap-2 mt-2">
+                      <button onClick={() => openAdjust(p.id, "in")} style={{ background: "#E7F1EC", color: "#1F5C4E" }} className="flex-1 rounded-lg py-1.5 text-sm font-medium">รับเข้า</button>
+                      <button onClick={() => openAdjust(p.id, "out")} style={{ background: "#F4E7E2", color: "#A34A34" }} className="flex-1 rounded-lg py-1.5 text-sm font-medium">จ่ายออก</button>
+                      <button onClick={() => removeProduct(p.id)} className="px-3 rounded-lg text-sm text-[#8a8371]" style={{ border: "1px solid #E4DCC9" }}>ลบ</button>
+                    </div>
+                  ) : (
+                    <div className="mt-2 p-2 rounded-lg" style={{ background: "#F7F3EA" }}>
+                      <div className="text-xs mb-1 font-medium" style={{ color: activeAdjust.type === "in" ? "#1F5C4E" : "#A34A34" }}>
+                        {activeAdjust.type === "in" ? "รับสินค้าเข้า" : "จ่ายสินค้าออก"}
+                      </div>
+                      <input autoFocus value={adjustAmount} onChange={(e) => setAdjustAmount(e.target.value)} type="number" placeholder="จำนวน" className="w-full text-sm border rounded-lg px-2 py-1.5 mb-1" style={{ borderColor: "#E4DCC9" }} />
+                      <input value={adjustNote} onChange={(e) => setAdjustNote(e.target.value)} placeholder="หมายเหตุ (ไม่บังคับ)" className="w-full text-sm border rounded-lg px-2 py-1.5 mb-2" style={{ borderColor: "#E4DCC9" }} />
+                      <div className="flex gap-2">
+                        <button onClick={submitAdjust} style={{ background: activeAdjust.type === "in" ? "#1F5C4E" : "#A34A34", color: "#F7F3EA" }} className="flex-1 rounded-lg py-1.5 text-sm font-medium">ยืนยัน</button>
+                        <button onClick={() => setActiveAdjust(null)} className="flex-1 rounded-lg py-1.5 text-sm" style={{ border: "1px solid #E4DCC9" }}>ยกเลิก</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {tab === "scan" && (
+        <div className="px-4 -mt-3">
+          <div style={{ background: "#FFFFFF", border: "1px solid #E4DCC9" }} className="rounded-xl p-3 shadow-sm">
+            <div className="text-sm font-medium mb-2">สแกนบาร์โค้ดด้วยกล้อง</div>
+
+            {(scanStatus === "starting" || scanStatus === "scanning") && (
+              <div className="relative rounded-lg overflow-hidden" style={{ background: "#000" }}>
+                <video ref={videoRef} muted playsInline className="w-full h-56 object-cover" />
+                {scanStatus === "scanning" && <div className="absolute left-6 right-6 top-1/2 -translate-y-1/2 h-0.5" style={{ background: "#F0C36D" }} />}
+              </div>
+            )}
+            {scanStatus === "starting" && <div className="text-xs text-[#8a8371] mt-2">กำลังเปิดกล้อง...</div>}
+            {scanStatus === "scanning" && <div className="text-xs text-[#8a8371] mt-2">เล็งกล้องไปที่บาร์โค้ดสินค้า</div>}
+            {scanStatus === "denied" && <div className="text-sm mt-1" style={{ color: "#A34A34" }}>ไม่สามารถเปิดกล้องได้ กรุณาอนุญาตสิทธิ์กล้อง หรือกรอกรหัสด้วยตนเองด้านล่าง</div>}
+            {scanStatus === "unsupported" && <div className="text-sm mt-1" style={{ color: "#A34A34" }}>เบราว์เซอร์นี้ไม่รองรับการสแกนด้วยกล้อง (แนะนำ Chrome บน Android) หรือกรอกรหัสด้วยตนเองด้านล่าง</div>}
+
+            {scanStatus === "found" && scanMatch && scanMatch !== "notfound" && (
+              <div className="mt-1 p-3 rounded-lg" style={{ background: "#E7F1EC" }}>
+                <div className="text-xs text-[#1F5C4E]">พบสินค้า</div>
+                <div className="font-medium text-sm">{scanMatch.name}</div>
+                <div className="text-xs text-[#8a8371] mb-2">คงเหลือ {scanMatch.qty} {scanMatch.unit}</div>
+                <div className="flex gap-2">
+                  <button onClick={() => { setTab("products"); setSearch(scanMatch.name); openAdjust(scanMatch.id, "in"); }} style={{ background: "#1F5C4E", color: "#F7F3EA" }} className="flex-1 rounded-lg py-1.5 text-sm font-medium">รับเข้า</button>
+                  <button onClick={() => { setTab("products"); setSearch(scanMatch.name); openAdjust(scanMatch.id, "out"); }} style={{ background: "#A34A34", color: "#F7F3EA" }} className="flex-1 rounded-lg py-1.5 text-sm font-medium">จ่ายออก</button>
+                </div>
+              </div>
+            )}
+            {scanStatus === "found" && scanMatch === "notfound" && (
+              <div className="mt-1 p-3 rounded-lg" style={{ background: "#F4E7E2" }}>
+                <div className="text-sm" style={{ color: "#A34A34" }}>ไม่พบสินค้าที่ใช้รหัส {scanBarcode}</div>
+                <button onClick={() => { setAddForm({ name: "", unit: "ชิ้น", qty: "", cost: "", price: "", low: "5", barcode: scanBarcode }); setShowAdd(true); setTab("products"); }} style={{ background: "#1F5C4E", color: "#F7F3EA" }} className="w-full rounded-lg py-1.5 text-sm font-medium mt-2">+ เพิ่มสินค้าใหม่ด้วยรหัสนี้</button>
+              </div>
+            )}
+            {scanStatus === "found" && (
+              <button onClick={startCamera} className="w-full rounded-lg py-2 text-sm font-medium mt-2" style={{ border: "1px solid #E4DCC9" }}>สแกนใหม่</button>
+            )}
+
+            <div className="mt-3 pt-3" style={{ borderTop: "1px solid #F0EBDD" }}>
+              <div className="text-xs text-[#8a8371] mb-1">หรือกรอกรหัสบาร์โค้ดด้วยตนเอง</div>
+              <div className="flex gap-2">
+                <input value={manualCode} onChange={(e) => setManualCode(e.target.value)} placeholder="รหัสบาร์โค้ด" className="flex-1 text-sm border rounded-lg px-2 py-1.5" style={{ borderColor: "#E4DCC9" }} />
+                <button onClick={() => handleScanned(manualCode.trim())} style={{ background: "#1F5C4E", color: "#F7F3EA" }} className="px-4 rounded-lg text-sm font-medium">ค้นหา</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tab === "history" && (
+        <div className="px-4 -mt-3">
+          <div style={{ background: "#FFFFFF", border: "1px solid #E4DCC9" }} className="rounded-xl p-3 shadow-sm">
+            <div className="text-sm font-medium mb-2">ประวัติการเคลื่อนไหวสต็อก</div>
+            {history.length === 0 && <div className="text-sm text-[#8a8371] py-6 text-center">ยังไม่มีรายการ</div>}
+            <div className="space-y-2">
+              {history.map((h) => (
+                <div key={h.id} className="flex justify-between items-center py-2" style={{ borderBottom: "1px solid #F0EBDD" }}>
+                  <div>
+                    <div className="text-sm font-medium">{h.productName}</div>
+                    <div className="text-xs text-[#8a8371]">{formatTime(h.ts)}{h.note ? ` · ${h.note}` : ""}</div>
+                  </div>
+                  <div className="text-sm font-semibold" style={{ color: h.type === "in" ? "#1F5C4E" : "#A34A34" }}>{h.type === "in" ? "+" : "-"}{h.qty}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div style={{ background: "#FFFFFF", borderTop: "1px solid #E4DCC9" }} className="fixed bottom-0 left-0 right-0 flex max-w-full">
+        <button onClick={() => setTab("products")} className="flex-1 py-3 text-sm font-medium" style={{ color: tab === "products" ? "#1F5C4E" : "#8a8371" }}>สินค้า</button>
+        <button onClick={() => setTab("scan")} className="flex-1 py-3 text-sm font-medium" style={{ color: tab === "scan" ? "#1F5C4E" : "#8a8371" }}>สแกน</button>
+        <button onClick={() => setTab("history")} className="flex-1 py-3 text-sm font-medium" style={{ color: tab === "history" ? "#1F5C4E" : "#8a8371" }}>ประวัติ</button>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<StockApp />);
+</script>
+<script>
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("service-worker.js").catch(() => {});
+    });
+  }
+</script>
+</body>
+</html>

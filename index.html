@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+<title>จัดการสต็อกร้านชำ</title>
+<meta name="theme-color" content="#1F5C4E" />
+<link rel="manifest" href="manifest.json" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="สต็อกร้าน" />
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; background: #F7F3EA;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans Thai", "Sarabun", sans-serif;
+    color: #2B2A25;
+  }
+  input, select, button { font-family: inherit; font-size: 15px; }
+  button { cursor: pointer; border: none; }
+  .header { background: #1F5C4E; color: #F7F3EA; padding: 24px 16px 24px; }
+  .shop-name-input {
+    background: transparent; border: none; outline: none; color: #F7F3EA;
+    font-size: 18px; font-weight: 600; width: 100%; padding: 0;
+  }
+  .shop-name-input::placeholder { color: #B9D4CB; }
+  .stats-row { display: flex; gap: 20px; margin-top: 12px; font-size: 13px; }
+  .stats-row .value { font-size: 16px; font-weight: 600; margin-top: 2px; }
+  .stats-row .label { opacity: 0.7; font-size: 12px; }
+  .save-error { color: #F0C36D; font-size: 12px; margin-top: 8px; }
+  .content { padding: 0 16px; margin-top: -12px; padding-bottom: 80px; }
+  .card { background: #FFFFFF; border: 1px solid #E4DCC9; border-radius: 12px; padding: 12px; margin-bottom: 8px; }
+  .shadow { box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+  .search-input { width: 100%; border: none; outline: none; font-size: 14px; padding: 4px; background: transparent; }
+  .btn-primary { background: #1F5C4E; color: #F7F3EA; border-radius: 10px; padding: 10px; font-size: 14px; font-weight: 500; width: 100%; }
+  .btn-outline { border: 1px solid #E4DCC9; background: transparent; border-radius: 10px; padding: 10px; font-size: 14px; }
+  .field { width: 100%; border: 1px solid #E4DCC9; border-radius: 8px; padding: 8px; font-size: 14px; margin-bottom: 8px; }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  .product-card { margin-top: 8px; }
+  .product-top { display: flex; justify-content: space-between; align-items: flex-start; }
+  .product-name { font-weight: 500; font-size: 14px; }
+  .product-meta { font-size: 12px; color: #8a8371; margin-top: 2px; }
+  .product-qty { font-weight: 600; font-size: 18px; text-align: right; }
+  .product-qty.low { color: #A34A34; }
+  .product-unit { font-size: 12px; color: #8a8371; text-align: right; }
+  .low-warning { color: #A34A34; font-size: 12px; margin-top: 4px; }
+  .actions-row { display: flex; gap: 8px; margin-top: 8px; }
+  .btn-in { background: #E7F1EC; color: #1F5C4E; border-radius: 8px; padding: 6px; font-size: 14px; font-weight: 500; flex: 1; }
+  .btn-out { background: #F4E7E2; color: #A34A34; border-radius: 8px; padding: 6px; font-size: 14px; font-weight: 500; flex: 1; }
+  .btn-del { border: 1px solid #E4DCC9; border-radius: 8px; padding: 6px 12px; font-size: 14px; color: #8a8371; background: transparent; }
+  .adjust-panel { margin-top: 8px; padding: 8px; border-radius: 8px; background: #F7F3EA; }
+  .adjust-title { font-size: 12px; margin-bottom: 4px; font-weight: 500; }
+  .empty-msg { text-align: center; font-size: 14px; color: #8a8371; padding: 40px 0; }
+  .history-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #F0EBDD; }
+  .history-name { font-size: 14px; font-weight: 500; }
+  .history-meta { font-size: 12px; color: #8a8371; }
+  .history-qty { font-size: 14px; font-weight: 600; }
+  .tabbar { position: fixed; bottom: 0; left: 0; right: 0; background: #FFFFFF; border-top: 1px solid #E4DCC9; display: flex; }
+  .tabbar button { flex: 1; padding: 12px 0; font-size: 14px; font-weight: 500; background: transparent; color: #8a8371; }
+  .tabbar button.active { color: #1F5C4E; }
+  .hidden { display: none; }
+  video#scanVideo { width: 100%; height: 220px; object-fit: cover; border-radius: 8px; background: #000; }
+  .scan-status { font-size: 12px; color: #8a8371; margin-top: 8px; }
+  .scan-error { font-size: 14px; color: #A34A34; margin-top: 4px; }
+  .scan-match { margin-top: 8px; padding: 12px; border-radius: 8px; background: #E7F1EC; }
+  .scan-notfound { margin-top: 8px; padding: 12px; border-radius: 8px; background: #F4E7E2; }
+  .section-title { font-size: 14px; font-weight: 500; margin-bottom: 8px; }
+  .manual-block { margin-top: 12px; padding-top: 12px; border-top: 1px solid #F0EBDD; }
+  .manual-label { font-size: 12px; color: #8a8371; margin-bottom: 4px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <input id="shopNameInput" class="shop-name-input" placeholder="ชื่อร้าน" />
+  <div class="stats-row">
+    <div><div class="label">มูลค่าสต็อก</div><div class="value" id="statValue">฿0</div></div>
+    <div><div class="label">รายการสินค้า</div><div class="value" id="statCount">0</div></div>
+    <div><div class="label">ใกล้หมด</div><div class="value" id="statLow">0</div></div>
+  </div>
+  <div class="save-error hidden" id="saveError">บันทึกข้อมูลไม่สำเร็จ ลองอีกครั้ง</div>
+</div>
+
+<div class="content">
+
+  <div id="tabProducts">
+    <div class="card shadow">
+      <input id="searchInput" class="search-input" placeholder="ค้นหาสินค้า..." />
+    </div>
+    <button class="btn-primary" id="toggleAddBtn" style="margin-top:12px;">+ เพิ่มสินค้าใหม่</button>
+
+    <div class="card hidden" id="addForm" style="margin-top:8px;">
+      <input id="fName" class="field" placeholder="ชื่อสินค้า" />
+      <div class="row">
+        <select id="fUnit" class="field">
+          <option>ชิ้น</option><option>ถุง</option><option>ขวด</option><option>กล่อง</option><option>แพ็ค</option><option>กระป๋อง</option><option>ห่อ</option>
+        </select>
+        <input id="fQty" type="number" class="field" placeholder="จำนวนเริ่มต้น" />
+      </div>
+      <div class="row">
+        <input id="fCost" type="number" class="field" placeholder="ราคาทุน/หน่วย" />
+        <input id="fPrice" type="number" class="field" placeholder="ราคาขาย/หน่วย" />
+      </div>
+      <input id="fLow" type="number" class="field" placeholder="แจ้งเตือนเมื่อเหลือ (ชิ้น)" value="5" />
+      <input id="fBarcode" class="field" placeholder="รหัสบาร์โค้ด (ไม่บังคับ)" />
+      <button class="btn-primary" id="saveProductBtn">บันทึกสินค้า</button>
+    </div>
+
+    <div id="productList" style="margin-top:12px;"></div>
+  </div>
+
+  <div id="tabScan" class="hidden">
+    <div class="card shadow">
+      <div class="section-title">สแกนบาร์โค้ดด้วยกล้อง</div>
+      <video id="scanVideo" class="hidden" muted playsinline autoplay></video>
+      <div class="scan-status hidden" id="scanStarting">กำลังเปิดกล้อง...</div>
+      <div class="scan-status hidden" id="scanScanning">เล็งกล้องไปที่บาร์โค้ดสินค้า</div>
+      <div class="scan-error hidden" id="scanDenied">ไม่สามารถเปิดกล้องได้ กรุณาอนุญาตสิทธิ์กล้องในเบราว์เซอร์ (ไปที่การตั้งค่า Safari > กล้อง) หรือกรอกรหัสด้วยตนเองด้านล่าง</div>
+      <div id="scanResultArea"></div>
+      <button class="btn-outline hidden" id="scanAgainBtn" style="width:100%; margin-top:8px;">สแกนใหม่</button>
+      <div class="manual-block">
+        <div class="manual-label">หรือกรอกรหัสบาร์โค้ดด้วยตนเอง</div>
+        <div class="row">
+          <input id="manualCode" class="field" placeholder="รหัสบาร์โค้ด" style="margin-bottom:0;" />
+          <button class="btn-primary" id="manualSearchBtn" style="flex:0 0 auto; width:auto; padding:8px 16px;">ค้นหา</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="tabHistory" class="hidden">
+    <div class="card shadow">
+      <div class="section-title">ประวัติการเคลื่อนไหวสต็อก</div>
+      <div id="historyList"></div>
+    </div>
+  </div>
+
+</div>
+
+<div class="tabbar">
+  <button id="tabBtnProducts" class="active">สินค้า</button>
+  <button id="tabBtnScan">สแกน</button>
+  <button id="tabBtnHistory">ประวัติ</button>
+</div>
+
+<script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+  function formatMoney(n) { return Number(n || 0).toLocaleString("th-TH", { maximumFractionDigits: 2 }); }
+  function formatTime(ts) {
+    var d = new Date(ts);
+    return d.toLocaleString("th-TH", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  }
+
+  var state = { shopName: "ร้านชำของฉัน", products: [], history: [] };
+  var tab = "products";
+  var activeAdjust = null; // { id, type }
+
+  function loadState() {
+    try {
+      var raw = window.localStorage.getItem("pos-data");
+      if (raw) {
+        var data = JSON.parse(raw);
+        state.shopName = data.shopName || state.shopName;
+        state.products = data.products || [];
+        state.history = data.history || [];
+      }
+    } catch (e) {}
+  }
+
+  function saveState() {
+    try {
+      window.localStorage.setItem("pos-data", JSON.stringify(state));
+      document.getElementById("saveError").classList.add("hidden");
+    } catch (e) {
+      document.getElementById("saveError").classList.remove("hidden");
+    }
+  }
+
+  function renderHeader() {
+    var totalValue = state.products.reduce(function (sum, p) { return sum + p.qty * p.cost; }, 0);
+    var lowCount = state.products.filter(function (p) { return p.qty <= p.low; }).length;
+    document.getElementById("statValue").textContent = "฿" + formatMoney(totalValue);
+    document.getElementById("statCount").textContent = state.products.length;
+    var lowEl = document.getElementById("statLow");
+    lowEl.textContent = lowCount;
+    lowEl.style.color = lowCount > 0 ? "#F0C36D" : "#F7F3EA";
+  }
+
+  function renderProductList() {
+    var search = document.getElementById("searchInput").value.toLowerCase();
+    var listEl = document.getElementById("productList");
+    var filtered = state.products.filter(function (p) { return p.name.toLowerCase().indexOf(search) !== -1; });
+    listEl.innerHTML = "";
+    if (filtered.length === 0) {
+      var msg = document.createElement("div");
+      msg.className = "empty-msg";
+      msg.textContent = state.products.length === 0 ? "ยังไม่มีสินค้า เริ่มเพิ่มรายการแรกได้เลย" : "ไม่พบสินค้าที่ค้นหา";
+      listEl.appendChild(msg);
+      return;
+    }
+    filtered.forEach(function (p) {
+      var isLow = p.qty <= p.low;
+      var card = document.createElement("div");
+      card.className = "card product-card";
+
+      var top = document.createElement("div");
+      top.className = "product-top";
+      var left = document.createElement("div");
+      left.innerHTML =
+        '<div class="product-name"></div>' +
+        '<div class="product-meta"></div>' +
+        (p.barcode ? '<div class="product-meta"></div>' : "");
+      left.querySelector(".product-name").textContent = p.name;
+      left.querySelectorAll(".product-meta")[0].textContent =
+        "ทุน ฿" + formatMoney(p.cost) + " · ขาย ฿" + formatMoney(p.price) + " / " + p.unit;
+      if (p.barcode) left.querySelectorAll(".product-meta")[1].textContent = "รหัส " + p.barcode;
+
+      var right = document.createElement("div");
+      right.innerHTML = '<div class="product-qty"></div><div class="product-unit"></div>';
+      right.querySelector(".product-qty").textContent = p.qty;
+      right.querySelector(".product-qty").className = "product-qty" + (isLow ? " low" : "");
+      right.querySelector(".product-unit").textContent = p.unit;
+
+      top.appendChild(left);
+      top.appendChild(right);
+      card.appendChild(top);
+
+      if (isLow) {
+        var warn = document.createElement("div");
+        warn.className = "low-warning";
+        warn.textContent = "ใกล้หมด (เตือนที่ " + p.low + ")";
+        card.appendChild(warn);
+      }
+
+      if (activeAdjust && activeAdjust.id === p.id) {
+        var panel = document.createElement("div");
+        panel.className = "adjust-panel";
+        var title = document.createElement("div");
+        title.className = "adjust-title";
+        title.style.color = activeAdjust.type === "in" ? "#1F5C4E" : "#A34A34";
+        title.textContent = activeAdjust.type === "in" ? "รับสินค้าเข้า" : "จ่ายสินค้าออก";
+        panel.appendChild(title);
+
+        var amtInput = document.createElement("input");
+        amtInput.type = "number";
+        amtInput.className = "field";
+        amtInput.placeholder = "จำนวน";
+        amtInput.id = "adjustAmount";
+        panel.appendChild(amtInput);
+
+        var noteInput = document.createElement("input");
+        noteInput.className = "field";
+        noteInput.placeholder = "หมายเหตุ (ไม่บังคับ)";
+        noteInput.id = "adjustNote";
+        panel.appendChild(noteInput);
+
+        var btnRow = document.createElement("div");
+        btnRow.className = "actions-row";
+        var confirmBtn = document.createElement("button");
+        confirmBtn.textContent = "ยืนยัน";
+        confirmBtn.style.background = activeAdjust.type === "in" ? "#1F5C4E" : "#A34A34";
+        confirmBtn.style.color = "#F7F3EA";
+        confirmBtn.style.borderRadius = "8px";
+        confirmBtn.style.padding = "6px";
+        confirmBtn.style.flex = "1";
+        confirmBtn.onclick = function () { submitAdjust(p.id); };
+        var cancelBtn = document.createElement("button");
+        cancelBtn.textContent = "ยกเลิก";
+        cancelBtn.className = "btn-outline";
+        cancelBtn.style.flex = "1";
+        cancelBtn.onclick = function () { activeAdjust = null; renderProductList(); };
+        btnRow.appendChild(confirmBtn);
+        btnRow.appendChild(cancelBtn);
+        panel.appendChild(btnRow);
+
+        card.appendChild(panel);
+        setTimeout(function () { amtInput.focus(); }, 0);
+      } else {
+        var actions = document.createElement("div");
+        actions.className = "actions-row";
+        var inBtn = document.createElement("button");
+        inBtn.className = "btn-in";
+        inBtn.textContent = "รับเข้า";
+        inBtn.onclick = function () { activeAdjust = { id: p.id, type: "in" }; renderProductList(); };
+        var outBtn = document.createElement("button");
+        outBtn.className = "btn-out";
+        outBtn.textContent = "จ่ายออก";
+        outBtn.onclick = function () { activeAdjust = { id: p.id, type: "out" }; renderProductList(); };
+        var delBtn = document.createElement("button");
+        delBtn.className = "btn-del";
+        delBtn.textContent = "ลบ";
+        delBtn.onclick = function () { removeProduct(p.id); };
+        actions.appendChild(inBtn);
+        actions.appendChild(outBtn);
+        actions.appendChild(delBtn);
+        card.appendChild(actions);
+      }
+
+      listEl.appendChild(card);
+    });
+  }
+
+  function submitAdjust(productId) {
+    var amtInput = document.getElementById("adjustAmount");
+    var noteInput = document.getElementById("adjustNote");
+    var amt = Number(amtInput.value);
+    if (!amt || amt <= 0) return;
+    var product = state.products.find(function (p) { return p.id === productId; });
+    if (!product) return;
+    var delta = activeAdjust.type === "in" ? amt : -amt;
+    product.qty = Math.max(0, product.qty + delta);
+    state.history.unshift({
+      id: uid(), productId: product.id, productName: product.name,
+      type: activeAdjust.type, qty: amt, note: (noteInput.value || "").trim(), ts: Date.now(),
+    });
+    activeAdjust = null;
+    saveState();
+    renderAll();
+  }
+
+  function removeProduct(id) {
+    state.products = state.products.filter(function (p) { return p.id !== id; });
+    saveState();
+    renderAll();
+  }
+
+  function handleAddProduct() {
+    var name = document.getElementById("fName").value.trim();
+    if (!name) return;
+    var product = {
+      id: uid(), name: name,
+      unit: document.getElementById("fUnit").value,
+      qty: Number(document.getElementById("fQty").value) || 0,
+      cost: Number(document.getElementById("fCost").value) || 0,
+      price: Number(document.getElementById("fPrice").value) || 0,
+      low: Number(document.getElementById("fLow").value) || 0,
+      barcode: document.getElementById("fBarcode").value.trim(),
+    };
+    state.products.push(product);
+    if (product.qty > 0) {
+      state.history.unshift({
+        id: uid(), productId: product.id, productName: product.name,
+        type: "in", qty: product.qty, note: "สต็อกเริ่มต้น", ts: Date.now(),
+      });
+    }
+    saveState();
+    document.getElementById("fName").value = "";
+    document.getElementById("fQty").value = "";
+    document.getElementById("fCost").value = "";
+    document.getElementById("fPrice").value = "";
+    document.getElementById("fLow").value = "5";
+    document.getElementById("fBarcode").value = "";
+    document.getElementById("addForm").classList.add("hidden");
+    renderAll();
+  }
+
+  function renderHistory() {
+    var el = document.getElementById("historyList");
+    el.innerHTML = "";
+    if (state.history.length === 0) {
+      var msg = document.createElement("div");
+      msg.className = "empty-msg";
+      msg.textContent = "ยังไม่มีรายการ";
+      el.appendChild(msg);
+      return;
+    }
+    state.history.forEach(function (h) {
+      var row = document.createElement("div");
+      row.className = "history-row";
+      var left = document.createElement("div");
+      left.innerHTML = '<div class="history-name"></div><div class="history-meta"></div>';
+      left.querySelector(".history-name").textContent = h.productName;
+      left.querySelector(".history-meta").textContent = formatTime(h.ts) + (h.note ? " · " + h.note : "");
+      var right = document.createElement("div");
+      right.className = "history-qty";
+      right.style.color = h.type === "in" ? "#1F5C4E" : "#A34A34";
+      right.textContent = (h.type === "in" ? "+" : "-") + h.qty;
+      row.appendChild(left);
+      row.appendChild(right);
+      el.appendChild(row);
+    });
+  }
+
+  function renderAll() {
+    renderHeader();
+    renderProductList();
+    renderHistory();
+  }
+
+  function setTab(name) {
+    tab = name;
+    document.getElementById("tabProducts").classList.toggle("hidden", tab !== "products");
+    document.getElementById("tabScan").classList.toggle("hidden", tab !== "scan");
+    document.getElementById("tabHistory").classList.toggle("hidden", tab !== "history");
+    document.getElementById("tabBtnProducts").classList.toggle("active", tab === "products");
+    document.getElementById("tabBtnScan").classList.toggle("active", tab === "scan");
+    document.getElementById("tabBtnHistory").classList.toggle("active", tab === "history");
+    if (tab === "scan") { startScanner(); } else { stopScanner(); }
+  }
+
+  // ---- Barcode scanning (ZXing, works on iOS Safari + Android Chrome) ----
+  var codeReader = null;
+  var scanning = false;
+
+  function showScanStatus(status) {
+    document.getElementById("scanVideo").classList.toggle("hidden", status !== "starting" && status !== "scanning");
+    document.getElementById("scanStarting").classList.toggle("hidden", status !== "starting");
+    document.getElementById("scanScanning").classList.toggle("hidden", status !== "scanning");
+    document.getElementById("scanDenied").classList.toggle("hidden", status !== "denied");
+    document.getElementById("scanAgainBtn").classList.toggle("hidden", status !== "found");
+  }
+
+  function stopScanner() {
+    scanning = false;
+    if (codeReader) {
+      try { codeReader.reset(); } catch (e) {}
+    }
+  }
+
+  function startScanner() {
+    document.getElementById("scanResultArea").innerHTML = "";
+    showScanStatus("starting");
+    if (typeof ZXing === "undefined") {
+      showScanStatus("denied");
+      document.getElementById("scanDenied").textContent = "โหลดไลบรารีสแกนไม่สำเร็จ ตรวจสอบอินเทอร์เน็ตแล้วลองรีเฟรชหน้านี้";
+      return;
+    }
+    if (!codeReader) codeReader = new ZXing.BrowserMultiFormatReader();
+    scanning = true;
+
+    codeReader.listVideoInputDevices().then(function (devices) {
+      var deviceId = undefined;
+      if (devices && devices.length > 0) {
+        var back = devices.find(function (d) { return /back|rear|environment/i.test(d.label); });
+        deviceId = back ? back.deviceId : devices[devices.length - 1].deviceId;
+      }
+      showScanStatus("scanning");
+      codeReader.decodeFromVideoDevice(deviceId, "scanVideo", function (result, err) {
+        if (!scanning) return;
+        if (result) {
+          handleScanned(result.getText());
+        }
+      });
+    }).catch(function (e) {
+      showScanStatus("denied");
+    });
+  }
+
+  function handleScanned(code) {
+    stopScanner();
+    showScanStatus("found");
+    var match = state.products.find(function (p) { return p.barcode && p.barcode === code; });
+    var area = document.getElementById("scanResultArea");
+    area.innerHTML = "";
+    if (match) {
+      var box = document.createElement("div");
+      box.className = "scan-match";
+      box.innerHTML =
+        '<div style="font-size:12px;color:#1F5C4E;">พบสินค้า</div>' +
+        '<div style="font-weight:500;font-size:14px;"></div>' +
+        '<div style="font-size:12px;color:#8a8371;margin-bottom:8px;"></div>';
+      box.querySelectorAll("div")[1].textContent = match.name;
+      box.querySelectorAll("div")[2].textContent = "คงเหลือ " + match.qty + " " + match.unit;
+      var row = document.createElement("div");
+      row.className = "actions-row";
+      var inBtn = document.createElement("button");
+      inBtn.className = "btn-in";
+      inBtn.textContent = "รับเข้า";
+      inBtn.onclick = function () {
+        setTab("products");
+        document.getElementById("searchInput").value = match.name;
+        activeAdjust = { id: match.id, type: "in" };
+        renderProductList();
+      };
+      var outBtn = document.createElement("button");
+      outBtn.className = "btn-out";
+      outBtn.textContent = "จ่ายออก";
+      outBtn.onclick = function () {
+        setTab("products");
+        document.getElementById("searchInput").value = match.name;
+        activeAdjust = { id: match.id, type: "out" };
+        renderProductList();
+      };
+      row.appendChild(inBtn);
+      row.appendChild(outBtn);
+      box.appendChild(row);
+      area.appendChild(box);
+    } else {
+      var nf = document.createElement("div");
+      nf.className = "scan-notfound";
+      nf.innerHTML = '<div style="font-size:14px;color:#A34A34;">ไม่พบสินค้าที่ใช้รหัส ' + code + '</div>';
+      var addBtn = document.createElement("button");
+      addBtn.className = "btn-primary";
+      addBtn.style.marginTop = "8px";
+      addBtn.textContent = "+ เพิ่มสินค้าใหม่ด้วยรหัสนี้";
+      addBtn.onclick = function () {
+        setTab("products");
+        document.getElementById("addForm").classList.remove("hidden");
+        document.getElementById("fBarcode").value = code;
+      };
+      nf.appendChild(addBtn);
+      area.appendChild(nf);
+    }
+  }
+
+  // ---- Wire up events ----
+  document.getElementById("shopNameInput").addEventListener("input", function (e) {
+    state.shopName = e.target.value;
+    saveState();
+  });
+  document.getElementById("searchInput").addEventListener("input", renderProductList);
+  document.getElementById("toggleAddBtn").addEventListener("click", function () {
+    var form = document.getElementById("addForm");
+    var isHidden = form.classList.contains("hidden");
+    form.classList.toggle("hidden");
+    this.textContent = isHidden ? "ปิดฟอร์ม" : "+ เพิ่มสินค้าใหม่";
+  });
+  document.getElementById("saveProductBtn").addEventListener("click", handleAddProduct);
+  document.getElementById("tabBtnProducts").addEventListener("click", function () { setTab("products"); });
+  document.getElementById("tabBtnScan").addEventListener("click", function () { setTab("scan"); });
+  document.getElementById("tabBtnHistory").addEventListener("click", function () { setTab("history"); });
+  document.getElementById("scanAgainBtn").addEventListener("click", startScanner);
+  document.getElementById("manualSearchBtn").addEventListener("click", function () {
+    var v = document.getElementById("manualCode").value.trim();
+    if (v) handleScanned(v);
+  });
+
+  // ---- Init ----
+  loadState();
+  document.getElementById("shopNameInput").value = state.shopName;
+  renderAll();
+
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", function () {
+      navigator.serviceWorker.register("service-worker.js").catch(function () {});
+    });
+  }
+})();
+</script>
+</body>
+</html>

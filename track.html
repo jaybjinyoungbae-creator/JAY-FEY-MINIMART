@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>ติดตามออเดอร์</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; background: #FAF9FC;
+    font-family: 'Prompt', -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans Thai", sans-serif;
+    color: #241F33;
+  }
+  .header { background: linear-gradient(135deg, #7A6CE0, #4F7FE0); color: #FAF9FC; padding: 20px 16px 22px; text-align: center; }
+  .header h1 { margin: 0; font-size: 17px; font-weight: 600; }
+  .content { padding: 16px; max-width: 440px; margin: 0 auto; }
+  .card { background: #FFFFFF; border: 1px solid #E6E1F2; border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+
+  .step-list { list-style: none; margin: 0; padding: 0; }
+  .step-item { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; }
+  .step-dot { width: 26px; height: 26px; border-radius: 50%; background: #E6E1F2; color: #8B84A3; display: flex; align-items: center; justify-content: center; font-size: 13px; flex-shrink: 0; }
+  .step-item.done .step-dot { background: #6C5CE0; color: #fff; }
+  .step-item.current .step-dot { background: #6C5CE0; color: #fff; box-shadow: 0 0 0 4px #EDEAFB; }
+  .step-text { font-size: 14px; padding-top: 3px; color: #8B84A3; }
+  .step-item.done .step-text, .step-item.current .step-text { color: #241F33; font-weight: 500; }
+
+  .order-items { font-size: 13px; color: #444; margin: 4px 0; }
+  .order-total { font-size: 15px; font-weight: 600; color: #6C5CE0; margin-top: 8px; }
+  .section-title { font-size: 13px; font-weight: 600; color: #6C5CE0; margin: 0 0 8px; }
+  .empty-msg { text-align: center; font-size: 14px; color: #8B84A3; padding: 40px 20px; }
+  .cancelled-msg { text-align: center; color: #C1543F; font-size: 14px; padding: 10px 0; }
+  .notif-hint { font-size: 12px; color: #8B84A3; text-align: center; margin-top: 6px; }
+  .btn-outline { border: 1px solid #E6E1F2; background: #fff; border-radius: 10px; padding: 10px; font-size: 13px; width: 100%; margin-top: 8px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>📦 ติดตามสถานะออเดอร์</h1>
+</div>
+
+<div class="content">
+  <div id="loadingMsg" class="empty-msg">🔄 กำลังโหลดข้อมูลออเดอร์...</div>
+  <div id="orderArea" style="display:none;">
+
+    <div class="card">
+      <ul class="step-list" id="stepList"></ul>
+      <div id="deliveryPhotoArea"></div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">รายละเอียดออเดอร์</div>
+      <div class="order-items" id="orderItemsText"></div>
+      <div class="order-total" id="orderTotalText"></div>
+    </div>
+
+    <button class="btn-outline" id="enableNotifBtn">🔔 เปิดแจ้งเตือนหน้านี้ไว้</button>
+    <div class="notif-hint">เปิดหน้านี้ทิ้งไว้ จะมีแจ้งเตือนขึ้นทันทีที่ร้านอัปเดตสถานะ</div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<script>
+  var firebaseConfig = {
+    apiKey: "AIzaSyBnh8E_mFq71KB44_Zg8gzWRqQUwgvjIHs",
+    authDomain: "pos-jay-fey-minimart.firebaseapp.com",
+    projectId: "pos-jay-fey-minimart",
+    storageBucket: "pos-jay-fey-minimart.firebasestorage.app",
+    messagingSenderId: "245738776832",
+    appId: "1:245738776832:web:bf12e8752c1f53370aabe5"
+  };
+  firebase.initializeApp(firebaseConfig);
+  var db = firebase.firestore();
+
+  var params = new URLSearchParams(window.location.search);
+  var orderId = params.get("id");
+  var lastStatus = null;
+  var firstLoad = true;
+
+  var STEPS = [
+    { key: "new", label: "🆕 ร้านได้รับออเดอร์แล้ว" },
+    { key: "preparing", label: "📦 กำลังจัดของ" },
+    { key: "delivering", label: "🛵 กำลังนำไปส่ง" },
+    { key: "done", label: "✅ ส่งถึงห้องแล้ว" }
+  ];
+
+  function formatMoney(n) {
+    return Number(n || 0).toLocaleString("th-TH", { maximumFractionDigits: 2 });
+  }
+
+  function playPing() {
+    try {
+      var Ctx = window.AudioContext || window.webkitAudioContext;
+      var ctx = new Ctx();
+      var osc = ctx.createOscillator();
+      var gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = 660;
+      gain.gain.setValueAtTime(0.001, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.start(); osc.stop(ctx.currentTime + 0.5);
+    } catch (e) {}
+  }
+
+  document.getElementById("enableNotifBtn").addEventListener("click", function () {
+    if (!("Notification" in window)) { alert("เบราว์เซอร์นี้ไม่รองรับการแจ้งเตือน"); return; }
+    Notification.requestPermission().then(function (perm) {
+      if (perm === "granted") {
+        document.getElementById("enableNotifBtn").textContent = "🔔 เปิดแจ้งเตือนแล้ว";
+        document.getElementById("enableNotifBtn").disabled = true;
+      } else {
+        alert("ถ้าอยากได้แจ้งเตือน กรุณาอนุญาตการแจ้งเตือนของเบราว์เซอร์ครับ");
+      }
+    });
+  });
+
+  function notifyStatusChange(order) {
+    var stepInfo = STEPS.find(function (s) { return s.key === order.status; });
+    var text = stepInfo ? stepInfo.label : ("สถานะออเดอร์เปลี่ยนเป็น " + order.status);
+    if (order.status === "cancelled") text = "❌ ออเดอร์ถูกยกเลิก";
+    playPing();
+    if ("Notification" in window && Notification.permission === "granted") {
+      try {
+        new Notification("อัปเดตออเดอร์ของคุณ", { body: text, icon: "icon-192.png" });
+      } catch (e) {}
+    }
+  }
+
+  function renderOrder(order) {
+    document.getElementById("loadingMsg").style.display = "none";
+    document.getElementById("orderArea").style.display = "block";
+
+    var itemsText = order.items.map(function (it) { return it.name + " x" + it.qty; }).join(", ");
+    document.getElementById("orderItemsText").textContent = itemsText;
+    document.getElementById("orderTotalText").textContent = "ยอดรวม ฿" + formatMoney(order.total);
+
+    var stepList = document.getElementById("stepList");
+    stepList.innerHTML = "";
+
+    if (order.status === "cancelled") {
+      stepList.innerHTML = '<div class="cancelled-msg">❌ ออเดอร์นี้ถูกยกเลิกแล้ว<br/>หากมีข้อสงสัยติดต่อร้านได้เลยครับ</div>';
+    } else {
+      var currentIdx = STEPS.findIndex(function (s) { return s.key === order.status; });
+      STEPS.forEach(function (step, idx) {
+        var li = document.createElement("li");
+        li.className = "step-item" + (idx < currentIdx ? " done" : idx === currentIdx ? " current" : "");
+        li.innerHTML = '<div class="step-dot">' + (idx < currentIdx ? "✓" : (idx + 1)) + '</div><div class="step-text">' + step.label + '</div>';
+        stepList.appendChild(li);
+      });
+    }
+
+    var photoArea = document.getElementById("deliveryPhotoArea");
+    if (order.status === "done" && order.deliveryPhoto) {
+      photoArea.innerHTML =
+        '<div style="margin-top:12px; padding-top:12px; border-top:1px solid #F0EDF8;">' +
+        '<div style="font-size:13px; font-weight:500; margin-bottom:6px;">📷 รูปตอนส่งของถึง</div>' +
+        '<img src="' + order.deliveryPhoto + '" style="width:100%; border-radius:10px;" />' +
+        '</div>';
+    } else {
+      photoArea.innerHTML = "";
+    }
+  }
+
+  if (!orderId) {
+    document.getElementById("loadingMsg").textContent = "ไม่พบลิงก์ออเดอร์ กรุณาตรวจสอบลิงก์อีกครั้งครับ";
+  } else {
+    db.collection("orders").doc(orderId).onSnapshot(function (doc) {
+      if (!doc.exists) {
+        document.getElementById("loadingMsg").textContent = "ไม่พบออเดอร์นี้ในระบบครับ";
+        return;
+      }
+      var order = doc.data();
+      if (!firstLoad && order.status !== lastStatus) {
+        notifyStatusChange(order);
+      }
+      lastStatus = order.status;
+      firstLoad = false;
+      renderOrder(order);
+    }, function (err) {
+      document.getElementById("loadingMsg").textContent = "โหลดข้อมูลไม่สำเร็จ: " + err.message;
+    });
+  }
+</script>
+</body>
+</html>
